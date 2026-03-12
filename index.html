@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Pomify</title>
+        <title>Focsd</title>
+        <link id="favicon" rel="icon" type="image/png">
         <style>
             * {
                 font-family: "Atkinson Hyperlegible Mono", sans-serif;
@@ -111,16 +112,17 @@
                     <div id="startStop"></div>
                 </div>
                 <p id="mode">Work</p>
+                <p id="sessionCount">0 Sessions</p>
             </div>
             <svg id="settingsButton" onclick="openSettings();" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
                 <path fill="#339989" d="M 447.70881 -12.781343 A 42.041451 42.041451 0 0 0 405.66786 29.260344 L 405.66786 50.301721 L 27.434765 50.301721 A 42.041302 42.041302 0 0 0 -14.606185 92.341354 A 42.041302 42.041302 0 0 0 27.434765 134.38304 L 405.66786 134.38304 L 405.66786 155.44906 A 42.041451 42.041451 0 0 0 447.70881 197.49075 A 42.041451 42.041451 0 0 0 489.74976 155.44906 L 489.74976 134.38304 L 573.78036 134.38304 A 42.041302 42.041302 0 0 0 615.82336 92.341354 A 42.041302 42.041302 0 0 0 573.78036 50.301721 L 489.74976 50.301721 L 489.74976 29.260344 A 42.041451 42.041451 0 0 0 447.70881 -12.781343 z M 143.0012 197.48869 A 42.041451 42.041451 0 0 0 100.9582 239.53038 L 100.9582 260.5697 L 27.447078 260.5697 A 42.041302 42.041302 0 0 0 -14.593872 302.61139 A 42.041302 42.041302 0 0 0 27.447078 344.65308 L 100.9582 344.65308 L 100.9582 365.7191 A 42.041451 42.041451 0 0 0 143.0012 407.76078 A 42.041451 42.041451 0 0 0 185.04215 365.7191 L 185.04215 344.65308 L 573.79472 344.65308 A 42.041302 42.041302 0 0 0 615.83567 302.61139 A 42.041302 42.041302 0 0 0 573.79472 260.5697 L 185.04215 260.5697 L 185.04215 239.53038 A 42.041451 42.041451 0 0 0 143.0012 197.48869 z M 279.59427 407.76078 A 42.041451 42.041451 0 0 0 237.55332 449.80042 L 237.55332 470.83974 L 27.447078 470.83974 A 42.041302 42.041302 0 0 0 -14.593872 512.88143 A 42.041302 42.041302 0 0 0 27.447078 554.92106 L 237.55332 554.92106 L 237.55332 575.98913 A 42.041451 42.041451 0 0 0 279.59427 618.02877 A 42.041451 42.041451 0 0 0 321.63522 575.98913 L 321.63522 554.92106 L 573.79472 554.92106 A 42.041302 42.041302 0 0 0 615.83567 512.88143 A 42.041302 42.041302 0 0 0 573.79472 470.83974 L 321.63522 470.83974 L 321.63522 449.80042 A 42.041451 42.041451 0 0 0 279.59427 407.76078 z"/>
             </svg>
         </div>
         <script>
-            let WORK_MINS = 25;
-            let BREAK_MINS = 5;
-            
-            let totalSeconds = WORK_MINS * 60;
+            let WORK_SECS = parseInt(localStorage.getItem("workSecs")) || 25 * 60;
+            let BREAK_SECS = parseInt(localStorage.getItem("breakSecs")) || 5 * 60;
+
+            let totalSeconds = WORK_SECS;
             let secondsLeft = totalSeconds;
             let isRunning = false;
             let isWork = true;
@@ -128,14 +130,22 @@
             let startTime = null;
             let settingsOpen = false;
             let editingWork = true;
-            
+            let titleInterval = null;
+            let lastValidInput = secsToDisplay(WORK_SECS);
+
+            function secsToDisplay(secs) {
+                const mins = Math.floor(secs / 60);
+                const s = secs % 60;
+                return String(mins).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+            }
+
             function updateDisplay(secondsRemaining) {
                 const ceiled = Math.ceil(secondsRemaining);
                 const mins = Math.floor(ceiled / 60);
                 const secs = ceiled % 60;
                 document.querySelector("#timer").innerText =
                     String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
-            
+
                 const progress = secondsRemaining / totalSeconds;
                 const angle = (2 * Math.PI * (1 - progress)) - Math.PI / 2;
                 const dotX = 150 + 120 * Math.cos(angle);
@@ -143,26 +153,71 @@
                 document.querySelector("#dot").setAttribute("cx", dotX);
                 document.querySelector("#dot").setAttribute("cy", dotY);
             }
-            
-            function switchMode() {
+
+            function updateTitle() {
+                const elapsed = (performance.now() - startTime) / 1000;
+                const remaining = Math.max(totalSeconds - elapsed, 0);
+                const ceiled = Math.ceil(remaining);
+                const mins = Math.floor(ceiled / 60);
+                const secs = ceiled % 60;
+                const mode = isWork ? "Work" : "Break";
+                document.title = String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0") + " - " + mode + " - Focsd";
+            }
+
+            function switchMode(fromInterval) {
                 isWork = !isWork;
                 if (isWork) {
-                    totalSeconds = WORK_MINS * 60;
+                    totalSeconds = WORK_SECS;
                     document.querySelector("#mode").innerText = "Work";
                 } else {
                     sessions++;
-                    totalSeconds = BREAK_MINS * 60;
+                    if (sessions === 1) {
+                        document.querySelector("#sessionCount").innerText = sessions + " Session";
+                    } else {
+                        document.querySelector("#sessionCount").innerText = sessions + " Sessions";
+                    }
+                    totalSeconds = BREAK_SECS;
                     document.querySelector("#mode").innerText = "Break";
                 }
                 secondsLeft = totalSeconds;
                 updateDisplay(secondsLeft);
+                updateFavicon();
+                if (!fromInterval) {
+                    playBeep();
+                    if (Notification.permission === "granted") {
+                        new Notification("Focsd", { body: isWork ? "Time to work!" : "Time for a break!" });
+                    }
+                }
                 startTimer();
             }
-            
+
             function startTimer() {
+                clearInterval(titleInterval);
                 isRunning = true;
-                startTime = performance.now() - ((totalSeconds - secondsLeft) * 1000);
-            
+                startTime = performance.now();
+
+                titleInterval = setInterval(function() {
+                    if (!isRunning) {
+                        clearInterval(titleInterval);
+                        return;
+                    }
+                    const elapsed = (performance.now() - startTime) / 1000;
+                    const remaining = Math.max(totalSeconds - elapsed, 0);
+
+                    if (remaining <= 0) {
+                        clearInterval(titleInterval);
+                        isRunning = false;
+                        playBeep();
+                        if (Notification.permission === "granted") {
+                            new Notification("Focsd", { body: isWork ? "Time for a break!" : "Time to work!" });
+                        }
+                        switchMode(true);
+                        return;
+                    }
+
+                    updateTitle();
+                }, 500);
+
                 function frame(timestamp) {
                     if (!isRunning) return;
                     const elapsed = (timestamp - startTime) / 1000;
@@ -170,100 +225,177 @@
                     updateDisplay(secondsLeft);
                     if (secondsLeft <= 0) {
                         isRunning = false;
-                        switchMode();
                         return;
                     }
                     requestAnimationFrame(frame);
                 }
                 requestAnimationFrame(frame);
             }
-            
+
             function startStop() {
                 if (settingsOpen) return;
+                Notification.requestPermission();
                 document.querySelector("#startStop").classList.toggle("paused");
                 if (isRunning) {
                     isRunning = false;
+                    clearInterval(titleInterval);
                     secondsLeft = totalSeconds;
                     updateDisplay(secondsLeft);
+                    updateTitle();
                 } else {
                     startTimer();
                 }
             }
-            
+
             function saveTimerInput() {
                 const timer = document.querySelector("#timer");
                 const text = timer.innerText.trim();
+                const valid = /^\d{1,2}:\d{2}$/.test(text);
+
+                if (!valid) {
+                    timer.innerText = lastValidInput;
+                    return;
+                }
+
                 const parts = text.split(":");
-                if (parts.length === 2) {
-                    let mins = parseInt(parts[0]);
-                    let secs = parseInt(parts[1]);
-                    if (isNaN(mins)) mins = 0;
-                    if (isNaN(secs)) secs = 0;
-                    mins = Math.min(59, Math.max(0, mins));
-                    secs = Math.min(59, Math.max(0, secs));
-                    const newTotal = mins * 60 + secs;
-                    if (newTotal > 0) {
-                        if (editingWork) {
-                            WORK_MINS = mins;
-                            if (isWork) {
-                                totalSeconds = newTotal;
-                                secondsLeft = newTotal;
-                            }
-                        } else {
-                            BREAK_MINS = mins;
-                            if (!isWork) {
-                                totalSeconds = newTotal;
-                                secondsLeft = newTotal;
-                            }
-                        }
+                let mins = parseInt(parts[0]);
+                let secs = parseInt(parts[1]);
+
+                if (isNaN(mins)) mins = 0;
+                if (isNaN(secs)) secs = 0;
+
+                mins = Math.min(59, Math.max(0, mins));
+                secs = Math.min(59, Math.max(0, secs));
+
+                const newTotal = mins * 60 + secs;
+
+                if (newTotal <= 0) {
+                    timer.innerText = lastValidInput;
+                    return;
+                }
+
+                if (editingWork) {
+                    WORK_SECS = newTotal;
+                    if (isWork) {
+                        totalSeconds = newTotal;
+                        secondsLeft = newTotal;
+                    }
+                } else {
+                    BREAK_SECS = newTotal;
+                    if (!isWork) {
+                        totalSeconds = newTotal;
+                        secondsLeft = newTotal;
                     }
                 }
+
+                lastValidInput = String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
             }
-            
+
             function toggleEditMode() {
                 if (!settingsOpen) return;
                 saveTimerInput();
                 editingWork = !editingWork;
                 document.querySelector("#mode").innerText = editingWork ? "Work" : "Break";
-                const mins = editingWork ? WORK_MINS : BREAK_MINS;
-                document.querySelector("#timer").innerText =
-                    String(mins).padStart(2, "0") + ":00";
+                lastValidInput = secsToDisplay(editingWork ? WORK_SECS : BREAK_SECS);
+                document.querySelector("#timer").innerText = lastValidInput;
                 document.querySelector("#timer").focus();
             }
-            
+
             function openSettings() {
                 settingsOpen = !settingsOpen;
                 const timer = document.querySelector("#timer");
                 const btn = document.querySelector("#settingsButton");
-            
+
                 if (settingsOpen) {
                     if (isRunning) {
                         isRunning = false;
+                        clearInterval(titleInterval);
                         document.querySelector("#startStop").classList.remove("paused");
                     }
                     editingWork = true;
+                    lastValidInput = secsToDisplay(WORK_SECS);
                     document.querySelector("#mode").innerText = "Work";
-                    timer.innerText = String(WORK_MINS).padStart(2, "0") + ":00";
+                    timer.innerText = lastValidInput;
                     timer.contentEditable = "true";
                     timer.focus();
                     btn.classList.add("active");
                     document.querySelector("#mode").style.cursor = "pointer";
+
+                    timer.addEventListener("keydown", function limitInput(e) {
+                        if (!settingsOpen) {
+                            timer.removeEventListener("keydown", limitInput);
+                            return;
+                        }
+                        const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight"];
+                        if (!allowed.includes(e.key) && timer.innerText.length >= 5) {
+                            e.preventDefault();
+                        }
+                    });
                 } else {
                     saveTimerInput();
                     timer.contentEditable = "false";
                     btn.classList.remove("active");
                     editingWork = true;
                     document.querySelector("#mode").innerText = isWork ? "Work" : "Break";
-                    secondsLeft = isWork ? WORK_MINS * 60 : BREAK_MINS * 60;
+                    secondsLeft = isWork ? WORK_SECS : BREAK_SECS;
                     totalSeconds = secondsLeft;
                     updateDisplay(secondsLeft);
                     document.querySelector("#mode").style.cursor = "default";
+                    localStorage.setItem("workSecs", WORK_SECS);
+                    localStorage.setItem("breakSecs", BREAK_SECS);
                 }
             }
-            
+
             document.querySelector("#mode").onclick = toggleEditMode;
-            
+
             updateDisplay(secondsLeft);
+            updateFavicon();
+            document.title = secsToDisplay(WORK_SECS) + " - Work - Focsd";
+
+            document.addEventListener("keydown", function(e) {
+                if (e.key === " ") {
+                    e.preventDefault();
+                    startStop();
+                }
+            });
+
+            function playBeep() {
+                const ctx = new AudioContext();
+                const oscillator = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                oscillator.connect(gain);
+                gain.connect(ctx.destination);
+
+                oscillator.type = "sine";
+                oscillator.frequency.value = 880;
+
+                gain.gain.setValueAtTime(0.5, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1);
+
+                oscillator.start(ctx.currentTime);
+                oscillator.stop(ctx.currentTime + 1);
+            }
+
+            function updateFavicon() {
+                const canvas = document.createElement("canvas");
+                canvas.width = 32;
+                canvas.height = 32;
+                const ctx = canvas.getContext("2d");
+
+                ctx.beginPath();
+                ctx.arc(16, 16, 14, 0, 2 * Math.PI);
+                ctx.fillStyle = isWork ? "#339989" : "#283044";
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(16, 16, 14, 0, 2 * Math.PI);
+                ctx.strokeStyle = "#339989";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                document.querySelector("#favicon").href = canvas.toDataURL();
+            }
         </script>
     </body>
 </html>
